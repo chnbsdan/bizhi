@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8">
+	<title>壁纸</title>
+	<style>
+		* { margin: 0; padding: 0; }
+		body { overflow: hidden; }
+	</style>
+</head>
+<body>
+	<canvas></canvas>
+	<script>
+		// 粒子系统常量
+		const PARTICLES_PER_SQUARE_PIXEL = 0.000005; // 每平方像素生成的粒子数
+		const PARTICLE_MIN_SIZE = 1;
+		const PARTICLE_MAX_SIZE = 2.5;
+		const PARTICLE_MIN_SPEED = 0.25;
+		const PARTICLE_MAX_SPEED = 0.5;
+		const PARTICLE_MIN_LIFETIME = 3000; // 毫秒
+		const PARTICLE_MAX_LIFETIME = 10000; // 毫秒
+		
+		// 连线系统常量
+		const CONNECTION_MAX_DISTANCE = 100; // 粒子间连线最大距离(像素)
+		const CONNECTION_LINE_WIDTH = 1; // 连线粗细(像素)
+		const MAX_CONNECTIONS_PER_PARTICLE = 4; // 每个粒子最多连线数
+		const MAX_TOTAL_CONNECTIONS = 750; // 最多连线数
+		
+		// 鼠标引力系统常量
+		const MOUSE_GRAVITY_RADIUS = 80; // 圆范围(像素)
+		const MOUSE_GRAVITY_FORCE = -0.1; // 圆范围引力(g)
+
+		// 粒子数组
+		let particles = [];
+		
+		// 鼠标位置
+		let mouseX = 0;
+		let mouseY = 0;
+
+		// 粒子类
+		class Particle {
+			constructor() {
+				// 从屏幕外5像素处生成
+				const side = Math.floor(Math.random() * 4);
+				switch(side) {
+					case 0: // 上边
+						this.x = Math.random() * canvas.width;
+						this.y = -5;
+						break;
+					case 1: // 右边
+						this.x = canvas.width + 5;
+						this.y = Math.random() * canvas.height;
+						break;
+					case 2: // 下边
+						this.x = Math.random() * canvas.width;
+						this.y = canvas.height + 5;
+						break;
+					case 3: // 左边
+						this.x = -5;
+						this.y = Math.random() * canvas.height;
+						break;
+				}
+
+				// 随机速度
+				const speed = PARTICLE_MIN_SPEED + Math.random() * (PARTICLE_MAX_SPEED - PARTICLE_MIN_SPEED);
+				const angle = Math.random() * Math.PI * 2;
+				this.vx = Math.cos(angle) * speed;
+				this.vy = Math.sin(angle) * speed;
+
+				// 生命周期
+				this.lifetime = PARTICLE_MIN_LIFETIME + Math.random() * (PARTICLE_MAX_LIFETIME - PARTICLE_MIN_LIFETIME);
+				this.age = 0;
+
+				// 初始大小
+				this.baseSize = PARTICLE_MIN_SIZE + Math.random() * (PARTICLE_MAX_SIZE - PARTICLE_MIN_SIZE);
+			}
+
+			update(deltaTime) {
+				// 计算鼠标引力
+				const dx = mouseX - this.x;
+				const dy = mouseY - this.y;
+				const distance = Math.sqrt(dx * dx + dy * dy);
+				
+				// 如果在鼠标引力范围内，应用引力
+				if (distance <= MOUSE_GRAVITY_RADIUS && distance > 0) {
+					const force = MOUSE_GRAVITY_FORCE * (1 - distance / MOUSE_GRAVITY_RADIUS);
+					const ax = (dx / distance) * force;
+					const ay = (dy / distance) * force;
+					this.vx += ax;
+					this.vy += ay;
+				}
+
+				// 更新位置
+				this.x += this.vx;
+				this.y += this.vy;
+
+				// 更新年龄
+				this.age += deltaTime;
+
+				// 检查是否会进入屏幕内
+				const willEnterScreen = 
+					(this.x >= -5 && this.x <= canvas.width + 5) &&
+					(this.y >= -5 && this.y <= canvas.height + 5);
+
+				// 检查是否超出生命周期或不会进入屏幕
+				return this.age < this.lifetime && willEnterScreen;
+			}
+
+			draw(ctx) {
+				// 计算生命周期进度 (0-1)
+				const lifeProgress = this.age / this.lifetime;
+				
+				// 越接近生命周期结束，粒子越大越透明，但不超过最大粒子大小
+				const maxSize = Math.max(this.baseSize, PARTICLE_MAX_SIZE);
+				const size = Math.min(this.baseSize * (1 + lifeProgress), maxSize);
+				const opacity = Math.max(0, 1 - lifeProgress);
+
+				// 绘制白色圆形粒子
+				ctx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
+				ctx.beginPath();
+				ctx.arc(this.x, this.y, size, 0, Math.PI * 2);
+				ctx.fill();
+			}
+		}
+
+		// 计算两个粒子之间的距离
+		function getDistance(p1, p2) {
+			const dx = p1.x - p2.x;
+			const dy = p1.y - p2.y;
+			return Math.sqrt(dx * dx + dy * dy);
+		}
+
+		// 绘制粒子间的连线
+		function drawConnections(ctx) {
+			// 为每个粒子记录当前连线数
+			const connectionCounts = new Array(particles.length).fill(0);
+			const connections = [];
+			
+			// 找出所有符合条件的连线
+			for (let i = 0; i < particles.length; i++) {
+				for (let j = i + 1; j < particles.length; j++) {
+					const p1 = particles[i];
+					const p2 = particles[j];
+					
+					// 检查距离是否在连线范围内
+					const distance = getDistance(p1, p2);
+					if (distance <= CONNECTION_MAX_DISTANCE && 
+						connectionCounts[i] < MAX_CONNECTIONS_PER_PARTICLE && 
+						connectionCounts[j] < MAX_CONNECTIONS_PER_PARTICLE &&
+						connections.length < MAX_TOTAL_CONNECTIONS) {
+						
+						connections.push({i, j, p1, p2, distance});
+						connectionCounts[i]++;
+						connectionCounts[j]++;
+					}
+				}
+			}
+			
+			// 绘制所有连线
+			connections.forEach(({p1, p2}) => {
+				// 计算两个粒子的透明度
+				const p1Opacity = Math.max(0, 1 - p1.age / p1.lifetime);
+				const p2Opacity = Math.max(0, 1 - p2.age / p2.lifetime);
+				
+				// 创建渐变连线
+				const gradient = ctx.createLinearGradient(p1.x, p1.y, p2.x, p2.y);
+				gradient.addColorStop(0, `rgba(255, 255, 255, ${p1Opacity * 0.5})`);
+				gradient.addColorStop(1, `rgba(255, 255, 255, ${p2Opacity * 0.5})`);
+				
+				// 绘制连线
+				ctx.strokeStyle = gradient;
+				ctx.lineWidth = CONNECTION_LINE_WIDTH;
+				ctx.beginPath();
+				ctx.moveTo(p1.x, p1.y);
+				ctx.lineTo(p2.x, p2.y);
+				ctx.stroke();
+			});
+		}
+
+		// 生成粒子
+		function generateParticles() {
+			const particleCount = Math.floor(canvas.width * canvas.height * PARTICLES_PER_SQUARE_PIXEL);
+			for (let i = 0; i < particleCount; i++) {
+				particles.push(new Particle());
+			}
+		}
+
+		// 获取Canvas元素和上下文
+		const canvas = document.querySelector("canvas");
+		const ctx = canvas.getContext("2d");
+
+		// 设置Canvas尺寸为窗口大小
+		function resizeCanvas() {
+			canvas.width = window.innerWidth;
+			canvas.height = window.innerHeight;
+		}
+
+		// 初始化尺寸并监听窗口大小变化
+		resizeCanvas();
+		window.addEventListener('resize', resizeCanvas);
+		
+		// 监听鼠标移动
+		window.addEventListener('mousemove', (e) => {
+			mouseX = e.clientX;
+			mouseY = e.clientY;
+		});
+
+		// 格式化时间为HH:MM格式
+		function formatTime(date) {
+			const hours = String(date.getHours()).padStart(2, '0');
+			const minutes = String(date.getMinutes()).padStart(2, '0');
+			return `${hours}:${minutes}`;
+		}
+
+		let lastTime = 0;
+
+		// 动画循环
+		function animate(currentTime) {
+			// 计算时间差
+			const deltaTime = currentTime - lastTime;
+			lastTime = currentTime;
+
+			// 绘制渐变背景
+			const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+			gradient.addColorStop(0, "rgb(255, 100, 180)");
+			gradient.addColorStop(0.5, "rgb(200, 150, 255)");
+			gradient.addColorStop(1, "rgb(0, 255, 255)");
+			ctx.fillStyle = gradient;
+			ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+			// 生成新粒子
+			if (Math.random() < 0.1) { // 控制生成频率
+				generateParticles();
+			}
+
+			// 更新粒子
+			particles = particles.filter(particle => {
+				return particle.update(deltaTime);
+			});
+
+			// 绘制连线（在粒子下方）
+			drawConnections(ctx);
+
+			// 绘制粒子
+			particles.forEach(particle => {
+				particle.draw(ctx);
+			});
+
+			// 获取当前时间
+			const timeString = formatTime(new Date());
+			
+			// 设置字体样式 - 响应式大小
+			const fontSize = Math.min(canvas.width, canvas.height) * 0.15;
+			ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+			ctx.textAlign = 'center';
+			ctx.textBaseline = 'middle';
+
+			// 设置发光效果
+			ctx.shadowColor = 'rgba(255, 255, 255, 0.75)';
+			ctx.shadowBlur = 10;
+			ctx.shadowOffsetX = 0;
+			ctx.shadowOffsetY = 0;
+
+			// 绘制白色文字
+			ctx.fillStyle = 'white';
+			ctx.fillText(timeString, canvas.width / 2, canvas.height / 2);
+
+			// 重置阴影设置
+			ctx.shadowBlur = 0;
+
+			requestAnimationFrame(animate);
+		}
+
+		// 启动动画
+		requestAnimationFrame(animate);
+	</script>
+</body>
+</html>
