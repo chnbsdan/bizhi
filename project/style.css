@@ -1,0 +1,19 @@
+/* ============================================
+   style.css - 样式文件
+   ============================================ */
+
+* {
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    overflow: hidden;
+    background: #000;
+    user-select: none; /* 防止拖动时选中文字 */
+}
+
+canvas {
+    display: block;
+    cursor: default;
+}
